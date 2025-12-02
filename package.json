@@ -1,0 +1,26 @@
+{
+  "name": "dataverse-adjustment-migration",
+  "version": "1.0.0",
+  "description": "Migration tool (dry-run/apply/rollback) for smvs_claim_adjustment_detail amounts",
+  "main": "cli.js",
+  "scripts": {
+    "start": "node cli.js",
+    "dry-run": "node cli.js dry-run",
+    "apply": "node cli.js apply",
+    "rollback": "node cli.js rollback"
+  },
+  "dependencies": {
+    "@signetic-mvs/multitenant-auth": "^3.5.0",
+    "axios": "^1.13.2",
+    "csv-parser": "^3.2.0",
+    "csv-writer": "^1.6.0",
+    "decimal.js": "^10.6.0",
+    "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
+    "p-queue": "6.6.2",
+    "yargs": "17.7.2"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

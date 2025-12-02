@@ -1,0 +1,45 @@
+# --- Node ---
+node_modules/
+.pnpm-debug.log
+
+
+# --- Environment / Config ---
+.env
+
+# --- Logs ---
+*.log
+logs/
+audit-log.csv
+
+# --- Backups & Proposals ---
+backups/
+proposals/
+exports/
+migrations/apply/*.xlsx
+migrations/compute/*.xlsx
+migration-runner/*.xlsx
+
+# --- Generated Excel/CSV Files ---
+*.xlsx
+*.csv
+
+# If you want to keep only specific generated files, comment out above
+# and whitelist below by removing leading "!"
+# !exports/
+# !backups/
+# !proposals/
+
+# --- Build / Cache ---
+dist/
+.tmp/
+.temp/
+
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Misc ---
+*.bak
+*.tmp
