@@ -7,27 +7,31 @@ async function writeStatsXlsx(destPath, statsRows) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Claim Caps");
   ws.columns = [
-    { header: "smvs_claim_id", key: "claimId", width: 40 },
-    { header: "PendingCapFromPrimary", key: "cap1", width: 15 },
-    { header: "totalAdjSecondary", key: "totSec", width: 18 },
-    { header: "Secondary_Excess", key: "secEx", width: 18 },
-    { header: "PendingCapFromSecondary", key: "cap2", width: 15 },
-    { header: "totalAdjTertiary", key: "totTer", width: 18 },
-    { header: "Tertiary_Excess", key: "terEx", width: 18 },
-    { header: "RemittanceCount", key: "remCount", width: 12 },
-    { header: "AdjustmentCount", key: "adjCount", width: 12 },
+    { header: "Claim ID", key: "claimId", width: 40 },
+    { header: "Claimed Amount", key: "claimedAmt", width: 18 },
+    { header: "Received Amount", key: "receivedAmt", width: 18 },
+    { header: "Patient Resp", key: "patientResp", width: 18 },
+    { header: "Pending Add. Payer", key: "pendingAdditionalPayer", width: 22 },
+    { header: "PR Amount", key: "PRAmt", width: 18 },
+    { header: "Current Adj Amount", key: "currentAdjustmentAmt", width: 22 },
+    { header: "Adjustment Cap", key: "adjustmentCap", width: 18 },
+    { header: "Amount to Reduce", key: "amountToReduce", width: 18 },
+    { header: "Total Reduced", key: "totalReduced", width: 18 },
+    { header: "Remaining to Reduce", key: "remainingToReduce", width: 22 },
   ];
   for (const s of statsRows) {
     ws.addRow({
       claimId: s.claimId,
-      cap1: s.PendingCapFromPrimary.toFixed(2),
-      totSec: s.totalAdjSecondary.toFixed(2),
-      secEx: s.Secondary_Excess.toFixed(2),
-      cap2: s.PendingCapFromSecondary.toFixed(2),
-      totTer: s.totalAdjTertiary.toFixed(2),
-      terEx: s.Tertiary_Excess.toFixed(2),
-      remCount: s.remittanceCount,
-      adjCount: s.adjustmentCount,
+      claimedAmt: s.claimedAmt.toFixed(2),
+      receivedAmt: s.receivedAmt.toFixed(2),
+      patientResp: s.patientResp.toFixed(2),
+      pendingAdditionalPayer: s.pendingAdditionalPayer.toFixed(2),
+      PRAmt: s.PRAmt.toFixed(2),
+      currentAdjustmentAmt: s.currentAdjustmentAmt.toFixed(2),
+      adjustmentCap: s.adjustmentCap.toFixed(2),
+      amountToReduce: s.amountToReduce.toFixed(2),
+      totalReduced: s.totalReduced.toFixed(2),
+      remainingToReduce: s.remainingToReduce.toFixed(2),
     });
   }
   await wb.xlsx.writeFile(destPath);

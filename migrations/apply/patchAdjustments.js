@@ -5,6 +5,7 @@ const { HttpConnection } = require("../../http");
 const { patchWithRetries } = require("../../utils/helpers");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const fs = require("fs");
+const path = require("path");
 const { default: PQueue } = require("p-queue");
 
 async function applyProposalsFile(proposalsFile, { concurrency = 4 } = {}) {
@@ -109,9 +110,13 @@ async function applyProposalsFile(proposalsFile, { concurrency = 4 } = {}) {
   }
 
   await q.onIdle();
-
+  console.log("Finished applying proposals.", proposalsFile);
   // write audit
-  const auditFile = pathJoinSafe(process.cwd(), "audit-log.csv");
+  const auditDir = path.join(path.dirname(proposalsFile), "audit-logs");
+  if (!fs.existsSync(auditDir)) {
+    fs.mkdirSync(auditDir, { recursive: true });
+  }
+  const auditFile = pathJoinSafe(auditDir, "audit-log.csv");
   const writer = createCsvWriter({
     path: auditFile,
     header: [
@@ -138,10 +143,9 @@ async function applyProposalsFile(proposalsFile, { concurrency = 4 } = {}) {
   };
   return { summary, auditFile };
 }
-
 function pathJoinSafe(...parts) {
-  const p = require("path").join(...parts);
-  return p;
+  return path.join(...parts);
 }
+
 
 module.exports = { applyProposalsFile };

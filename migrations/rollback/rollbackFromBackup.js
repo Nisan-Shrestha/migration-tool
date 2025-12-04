@@ -1,10 +1,12 @@
 // rollbackFromBackup.js
 const fs = require("fs");
+const path = require("path");
+const Decimal = require("decimal.js");
 const csvParser = require("csv-parser");
 const { HttpConnection } = require("../../http");
 const { patchWithRetries } = require("../../utils/helpers");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
-const Decimal = require("decimal.js");
+
 const PQueue = require("p-queue").default || require("p-queue");
 
 async function rollbackFromBackup({ backupFile }) {
@@ -66,7 +68,13 @@ async function rollbackFromBackup({ backupFile }) {
     `Rollback complete: ${successCount} successfully restored, ${failedCount} failed`
   );
 
-  const out = backupFile.replace(/\.csv$/, ".rollback-audit.csv");
+  const auditsDir = path.join(path.dirname(backupFile), "rollback-audit");
+  if (!fs.existsSync(auditsDir)) {
+    fs.mkdirSync(auditsDir, { recursive: true });
+  }
+  const parsedBackup = path.parse(backupFile);
+  const fileStem = parsedBackup.name || "backup";
+  const out = path.join(auditsDir, `${fileStem}.rollback-audit.csv`);
   const writer = createCsvWriter({
     path: out,
     header: [

@@ -1,18 +1,26 @@
-const path = require("path");
 const fs = require("fs");
-const { fetchClaims } = require("./compute/fetchClaims");
-const { fetchRemittancesForClaim } = require("./compute/fetchRemittances");
-const { fetchAdjustmentsForRemIds } = require("./compute/fetchAdjustments");
-const { computeStatsAndProposals } = require("./compute/computeProposals");
+const path = require("path");
+
+const Decimal = require("decimal.js");
+const { chunkArray } = require("../utils/helpers");
+const { fetchClaims } = require("./queries/fetchClaims");
 const { writeStatsXlsx } = require("./export/writeStatsXlsx");
-const { writeProposalsXlsx } = require("./export/writeProposalsXlsx");
 const { writeBackupCsv } = require("./export/writeBackupCsv");
 const { applyProposalsFile } = require("./apply/patchAdjustments");
+const { writeProposalsXlsx } = require("./export/writeProposalsXlsx");
 const { rollbackFromBackup } = require("./rollback/rollbackFromBackup");
-const { chunkArray } = require("../utils/helpers");
+const { fetchRemittancesForClaim } = require("./queries/fetchRemittances");
+const { computeStatsAndProposalsV2 } = require("./compute/computeProposals");
+const { fetchAdjustmentsForRemIds } = require("./queries/fetchAdjustments");
+
 const { default: PQueue } = require("p-queue");
 
-const { DEFAULT_BATCH_SIZE, DEFAULT_CONCURRENCY } = require("../constants");
+const {
+  DEFAULT_BATCH_SIZE,
+  DEFAULT_CONCURRENCY,
+  REMIT_SECONDARY,
+  REMIT_TERTIARY,
+} = require("../constants");
 
 async function dryRun({
   batchSize = DEFAULT_BATCH_SIZE,
@@ -22,17 +30,14 @@ async function dryRun({
 } = {}) {
   console.log("Starting dry-run...");
 
-  // fetch claims IDs (only IDs)
+  // fetch claims IDs having atleast one Claim Adjustment Detail with smvs_amount > 0 in any of its remittance. (only IDs)
   const claimRows = await fetchClaims();
 
-  let claimIds = claimRows
-    .map((r) => r.smvs_claimid)
-    .filter(Boolean)
-    .map(String);
+  let claims = claimRows.filter((r) => Boolean(r.smvs_claimid));
 
   // apply filters from command line if any
   if (claimFilters && claimFilters.length > 0) {
-    claimIds = claimIds.filter((id) => claimFilters.includes(id));
+    claims = claims.filter((r) => claimFilters.includes(r.smvs_claimid));
   } else if (claimsFile) {
     const txt = fs.readFileSync(claimsFile, "utf8");
     const set = new Set(
@@ -41,20 +46,25 @@ async function dryRun({
         .map((s) => s.split(",")[0].trim())
         .filter(Boolean)
     );
-    claimIds = claimIds.filter((id) => set.has(id));
+    claims = claims.filter((r) => set.has(r.smvs_claimid));
   }
 
-  console.log(`Claims selected: ${claimIds.length}`);
-  if (claimIds.length === 0) return;
-
+  console.log(`Claims selected for processing: ${claims.length}`);
+  if (claims.length === 0) return;
   // prepare outputs
-  fs.mkdirSync(path.resolve(process.cwd(), "proposals"), { recursive: true });
-  fs.mkdirSync(path.resolve(process.cwd(), "backups"), { recursive: true });
-  fs.mkdirSync(path.resolve(process.cwd(), "exports"), { recursive: true });
+  const reportsDir = path.resolve(process.cwd(), "reports");
+  const proposalsDir = path.resolve(reportsDir, "proposals");
+  const backupsDir = path.resolve(reportsDir, "backups");
+  const exportsDir = path.resolve(reportsDir, "exports");
 
-  const statsRows = [];
+  fs.mkdirSync(reportsDir, { recursive: true });
+  fs.mkdirSync(proposalsDir, { recursive: true });
+  fs.mkdirSync(backupsDir, { recursive: true });
+  fs.mkdirSync(exportsDir, { recursive: true });
+
   let batchIndex = 0;
-  const batches = chunkArray(claimIds, batchSize);
+  const statsRows = [];
+  const batches = chunkArray(claims, batchSize);
 
   for (const batch of batches) {
     batchIndex++;
@@ -65,59 +75,100 @@ async function dryRun({
     const q = new PQueue({ concurrency });
     const batchProposals = [];
 
-    for (const claimId of batch) {
+    for (const claim of batch) {
       q.add(async () => {
-        const rems = await fetchRemittancesForClaim(claimId);
-        const remIds = rems
-          .map((r) => r.smvs_patient_remittanceid)
-          .filter(Boolean)
-          .map(String);
-        let claimAdjDetailRows = [];
-        if (remIds.length > 0) {
-          claimAdjDetailRows = await fetchAdjustmentsForRemIds(remIds);
-          console.log(
-            `  Claim ${claimId}: fetched ${rems.length} remittances, ${claimAdjDetailRows.length} adjustments`
-          );
+        const claimedAmt = Decimal(claim.smvs_claimed_amount || 0);
+        const receivedAmt = Decimal(claim.smvs_recieved_amount || 0);
+        const patientResp = Decimal(
+          claim.smvs_patient_responsible_payment || 0
+        );
+        const pendingAdditionalPayer = Decimal(
+          claim.smvs_pending_from_additional_payer || 0
+        );
+        const currentAdjustmentAmt = Decimal(claim.smvs_adjustment_amount || 0);
+        const PRAmt = Decimal.max(pendingAdditionalPayer, patientResp);
+
+        const adjustmentCap = claimedAmt.minus(receivedAmt).minus(PRAmt);
+        const amountToReduce = currentAdjustmentAmt.minus(adjustmentCap);
+
+        if (amountToReduce.lte(0)) {
+          // no violation
+          return;
         }
 
-        const { stats, proposals } = computeStatsAndProposals(
-          claimId,
-          rems,
-          claimAdjDetailRows
+        // fetch 2ndary and tertiary remittances for claim
+        const remittanceResult = await fetchRemittancesForClaim(
+          claim.smvs_claimid
+        );
+        const remittances = remittanceResult.filter((r) =>
+          Boolean(r.smvs_patient_remittanceid)
         );
 
-        if (
-          stats &&
-          (stats.totalAdjSecondary.gt(stats.PendingCapFromPrimary) ||
-            stats.totalAdjTertiary.gt(stats.PendingCapFromSecondary))
-        ) {
-          statsRows.push(stats);
-          for (const p of proposals) {
-            batchProposals.push({
-              batchId,
-              claimId,
-              adjustmentId: p.adjustmentId,
-              parentRemId: p.parentRemId,
-              currentAmount: p.currentAmount.toFixed(2),
-              newAmount: p.newAmount.toFixed(2),
-              delta: p.delta.toFixed(2),
-            });
-          }
+        const sortRemittanceByType = (type) =>
+          remittances
+            .filter((r) => Number(r.smvs_remit_type_indicator) === type)
+            .sort(
+              (a, b) =>
+                new Date(b.smvs_check_processed_date) -
+                new Date(a.smvs_check_processed_date)
+            );
+
+        const remIds = remittances.map((r) =>
+          String(r.smvs_patient_remittanceid)
+        );
+
+        let claimAdjDetailRows = [];
+        claimAdjDetailRows = await fetchAdjustmentsForRemIds(remIds);
+
+        const tertiaryRems = sortRemittanceByType(REMIT_TERTIARY);
+        const secondaryRems = sortRemittanceByType(REMIT_SECONDARY);
+
+        const { proposals, totalReduced, remainingToReduce } =
+          computeStatsAndProposalsV2(
+            claim.smvs_claimid,
+            secondaryRems,
+            tertiaryRems,
+            claimAdjDetailRows,
+            amountToReduce
+          );
+        const statistics = {
+          claimId: claim.smvs_claimid,
+          claimedAmt,
+          receivedAmt,
+          patientResp,
+          pendingAdditionalPayer,
+          PRAmt,
+          currentAdjustmentAmt,
+          adjustmentCap,
+          amountToReduce,
+          totalReduced,
+          remainingToReduce,
+        };
+
+        statsRows.push(statistics);
+        for (const p of proposals) {
+          batchProposals.push({
+            batchId,
+            claimId: claim.smvs_claimid,
+            adjustmentId: p.adjustmentId,
+            parentRemId: p.parentRemId,
+            currentAmount: p.currentAmount.toFixed(2),
+            newAmount: p.newAmount.toFixed(2),
+            delta: p.delta.toFixed(2),
+          });
         }
       });
     }
     await q.onIdle();
 
     const proposalsFile = path.resolve(
-      process.cwd(),
-      `proposals/Proposed_Adjustments_${batchId}.xlsx`
+      proposalsDir,
+      `Proposed_Adjustments_${batchId}.xlsx`
     );
+
     await writeProposalsXlsx(proposalsFile, batchProposals);
 
-    const backupFile = path.resolve(
-      process.cwd(),
-      `backups/backup_${batchId}.csv`
-    );
+    const backupFile = path.resolve(backupsDir, `backup_${batchId}.csv`);
     await writeBackupCsv(
       backupFile,
       batchProposals.map((p) => ({
@@ -132,11 +183,7 @@ async function dryRun({
     console.log(`Total CAD changes proposed rows=${batchProposals.length}`);
   }
 
-  const statsFile = path.resolve(
-    process.cwd(),
-    "exports",
-    "Claim_Adjustment_Cap_Stats.xlsx"
-  );
+  const statsFile = path.resolve(exportsDir, "Claim_Adjustment_Cap_Stats.xlsx");
   await writeStatsXlsx(statsFile, statsRows);
 
   console.log(`Wrote data violation stats xlsx to ${statsFile}`);

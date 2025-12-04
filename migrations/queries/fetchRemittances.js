@@ -4,25 +4,34 @@ const { fetchAllFetchXml } = require("../../utils/dataverse");
 
 function remittancesFetchXmlForClaim(claimId) {
   return `
-<fetch>
+<fetch distinct="true">
   <entity name="smvs_patient_remittance">
-    <attribute name="smvs_patient_remittanceid" />
-    <attribute name="smvs_remit_type_indicator" />
-    <attribute name="smvs_patient_responsibility" />
-    <attribute name="smvs_pending_from_additional_payer" />
-    <attribute name="smvs_coverage_amount" />
-    <attribute name="smvs_adjustment_amount" />
-    <attribute name="createdon" />
-    <attribute name="smvs_claim_id" />
+    <attribute name="smvs_patient_remittanceid"/>
+    <attribute name="smvs_remit_type_indicator"/>
+    <attribute name="smvs_check_processed_date"/>
+    <attribute name="smvs_claim_id"/>
+    
+    <!-- 1st: sort remit type so 622490002 comes first -->
+    <order attribute="smvs_remit_type_indicator" descending="true"/>
+    
+    <!-- 2nd: sort latest check processed date -->
+    <order attribute="smvs_check_processed_date" descending="true"/>
+    
     <filter>
       <condition attribute="smvs_claim_id" operator="eq" value="${claimId}"/>
       <condition attribute="smvs_remit_type_indicator" operator="in">
-        <value>622490000</value>
         <value>622490001</value>
         <value>622490002</value>
       </condition>
     </filter>
-  </entity>
+    
+    <link-entity name="smvs_claim_adjustment_detail" from="smvs_patient_remittance" to="smvs_patient_remittanceid" link-type="inner" alias="cad">
+      <filter>
+        <condition attribute="smvs_amount" operator="gt" value="0"/>
+      </filter>
+    </link-entity>
+  
+    </entity>
 </fetch>
 `;
 }

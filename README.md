@@ -30,10 +30,12 @@ repo/
     migration-runner.js    # Orchestrates dry-run, apply, rollback
 
     compute/
+      computeProposals.js
+
+    queries/
       fetchClaims.js
       fetchRemittances.js
       fetchAdjustments.js
-      computeProposals.js
 
     export/
       writeStatsXlsx.js
@@ -78,9 +80,9 @@ Output: list of proposed changes.
 
 Dry-run produces:
 
-- `exports/Claim_Adjustment_Cap_Stats.xlsx`
-- `proposals/Proposed_Adjustments_batch_XXXX.xlsx`
-- `backups/backup_batch_XXXX.csv` (one per batch)
+- `reports/exports/Claim_Adjustment_Cap_Stats.xlsx`
+- `reports/proposals/Proposed_Adjustments_batch_XXXX.xlsx`
+- `reports/backups/backup_batch_XXXX.csv` (one per batch)
 
 ### 4. **Apply**
 
@@ -122,7 +124,7 @@ Generates stats, proposals, and backups.
 
 | Option                 | Description                       |
 | ---------------------- | --------------------------------- |
-| `--batchSize <n>`      | Claims per batch (default: 100)   |
+| `--batchSize <n>`      | Claims per batch (default: 2000)  |
 | `--concurrency <n>`    | Parallel fetch limit (default: 6) |
 | `--claims <comma IDs>` | Process only listed claim IDs     |
 | `--claims-file <path>` | File containing claim IDs         |
@@ -155,7 +157,7 @@ node cli.js dry-run --batchSize 250
 ## **2. Apply (update Dataverse)**
 
 ```
-node cli.js apply --proposals proposals/Proposed_Adjustments_batch_0001.xlsx
+node cli.js apply --proposals reports/proposals/Proposed_Adjustments_batch_0001.xlsx
 
 ```
 
@@ -171,7 +173,7 @@ node cli.js apply --proposals proposals/Proposed_Adjustments_batch_0001.xlsx
 ## **3. Rollback**
 
 ```
-node cli.js rollback --file backups/backup_batch_0001.csv
+node cli.js rollback --file reports/backups/backup_batch_0001.csv
 
 ```
 
@@ -222,9 +224,9 @@ Run:
 
 | Type          | Location               | Content                       |
 | ------------- | ---------------------- | ----------------------------- |
-| Stats XLSX    | `exports/`             | Per-claim cap + totals        |
-| Proposal XLSX | `proposals/`           | Per-batch proposed new values |
-| Backups       | `backups/`             | Original `smvs_amount` values |
+| Stats XLSX    | `reports/exports/`     | Per-claim cap + totals        |
+| Proposal XLSX | `reports/proposals/`   | Per-batch proposed new values |
+| Backups       | `reports/backups/`     | Original `smvs_amount` values |
 | Audit log     | `audit-log.csv`        | Apply history                 |
 | Rollback logs | `*.rollback-audit.csv` | Per-backup restore results    |
 
@@ -282,18 +284,18 @@ node cli.js dry-run --claims-file ./sample.txt
 
 ### 2. Inspect proposals
 
-Open files under `proposals/`.
+Open files under `reports/proposals/`.
 
 ### 3. Apply a single batch
 
 ```
-node cli.js apply --proposals proposals/Proposed_Adjustments_batch_0001.xlsx
+node cli.js apply --proposals reports/proposals/Proposed_Adjustments_batch_0001.xlsx
 
 ```
 
 ### 4. Rollback if needed
 
 ```
-node cli.js rollback --file backups/backup_batch_0001.csv
+node cli.js rollback --file reports/backups/backup_batch_0001.csv
 
 ```

@@ -14,119 +14,67 @@ function toDecimal(v) {
   }
 }
 
-// Returns stats and proposals (proposals contain adjustmentId, parentRemId, currentAmount Decimal, newAmount Decimal, delta Decimal)
-function computeStatsAndProposals(
+function computeStatsAndProposalsV2(
   claimId,
-  remittances = [],
-  claimAdjustmentDetails = []
+  secondaryRems,
+  tertiaryRems,
+  claimAdjDetailRows,
+  amountToReduce
 ) {
-  let PendingCapFromPrimary = new Decimal(0);
-  let PendingCapFromSecondary = new Decimal(0);
-  for (const remit of remittances) {
-    const remitType = Number(remit.smvs_remit_type_indicator || 0);
-    const pendingFromAdditional = toDecimal(
-      remit.smvs_pending_from_additional_payer || 0
-    );
-    const patientResp = toDecimal(remit.smvs_patient_responsibility || 0);
-    const useVal = Decimal.max(pendingFromAdditional, patientResp);
-
-    if (remitType === REMIT_PRIMARY)
-      PendingCapFromPrimary = PendingCapFromPrimary.plus(useVal);
-    else if (remitType === REMIT_SECONDARY)
-      PendingCapFromSecondary = PendingCapFromSecondary.plus(useVal);
-  }
-
-  let totalAdjSecondary = new Decimal(0);
-  let totalAdjTertiary = new Decimal(0);
-
-  for (const cad of claimAdjustmentDetails) {
-    const amt = toDecimal(cad.amount);
-    const remitType = cad.remitTypeIndicator ?? null;
-    if (remitType === REMIT_SECONDARY) {
-      totalAdjSecondary = totalAdjSecondary.plus(amt);
-    } else if (remitType === REMIT_TERTIARY)
-      totalAdjTertiary = totalAdjTertiary.plus(amt);
-  }
-
-  const stats = {
-    claimId,
-    PendingCapFromPrimary,
-    totalAdjSecondary,
-    Secondary_Excess: totalAdjSecondary.minus(PendingCapFromPrimary),
-    PendingCapFromSecondary,
-    totalAdjTertiary,
-    Tertiary_Excess: totalAdjTertiary.minus(PendingCapFromSecondary),
-    remittanceCount: remittances.length,
-    adjustmentCount: claimAdjustmentDetails.length,
-  };
-
-  // Generate changes to be made for migration
-
+  console.log("_________________________________\n\n\n");
   const proposals = [];
+  let remainingToReduce = toDecimal(amountToReduce);
 
-  // helper to collect and reduce list for typeMatch predicate
-  function generateAdjustmentProposals(
-    remitTypeFilter,
-    pendingAmountForCap,
-    totalAdj,
-    label
-  ) {
-    if (!totalAdj.gt(pendingAmountForCap)) return;
+  // Process tertiary remittances first, then secondary
+  const remsToProcess = [...tertiaryRems, ...secondaryRems];
+  for (const remit of remsToProcess) {
+    if (remainingToReduce.lte(0)) break;
 
-    let adjustmentsOverflow = totalAdj.minus(pendingAmountForCap);
-    // collect relevant adj rows with smvs_amount > 0
-    const filteredClaimAdjustmentDetails = claimAdjustmentDetails
-      .filter((cad) => {
-        const remitType = cad.remitTypeIndicator ?? null;
-        return remitTypeFilter(remitType);
-      })
-      .map((a) => ({ ...a, amountDec: toDecimal(a.amount) }))
-      .filter((x) => x.amountDec.gt(0));
+    const remitId = remit.smvs_patient_remittanceid;
+    // Find all claimAdjDetailRows associated with this remittance
+    const associatedAdjustments = claimAdjDetailRows
+      .filter((cad) => cad.parentRemId === remitId)
+      .map((cad) => ({
+        ...cad,
+        amount: Decimal(cad.amount),
+      }));
 
-    // sort Adjustments by amount DESC then createdon ASC if equal
-    filteredClaimAdjustmentDetails.sort((a, b) => {
-      const cmp = b.amountDec.minus(a.amountDec).toNumber();
+    // Sort by amount DESC, then by createdon DESC (latest first) if equal
+    associatedAdjustments.sort((a, b) => {
+      const cmp = b.amount.minus(a.amount);
       if (cmp !== 0) return cmp;
       const ca =
         a.raw && a.raw.createdon ? new Date(a.raw.createdon).getTime() : 0;
       const cb =
         b.raw && b.raw.createdon ? new Date(b.raw.createdon).getTime() : 0;
-      return ca - cb;
+      return cb - ca;
     });
 
-    for (const cad of filteredClaimAdjustmentDetails) {
-      if (adjustmentsOverflow.lte(0)) break;
-      const current = cad.amountDec;
-      const reduction = Decimal.min(current, adjustmentsOverflow);
+    // Generate proposals for each adjustment
+    for (const cad of associatedAdjustments) {
+      if (remainingToReduce.lte(0)) break;
+      const current = cad.amount;
+      const reduction = Decimal.min(current, remainingToReduce);
       const proposed = current.minus(reduction);
 
       proposals.push({
+        claimId,
         adjustmentId: cad.adjId,
         parentRemId: cad.parentRemId,
         currentAmount: current,
         newAmount: proposed,
         delta: proposed.minus(current),
       });
-      adjustmentsOverflow = adjustmentsOverflow.minus(reduction);
+
+      remainingToReduce = remainingToReduce.minus(reduction);
     }
   }
 
-  // secondary adjustments must be <= cap1
-  generateAdjustmentProposals(
-    (prt) => prt === REMIT_SECONDARY,
-    stats.PendingCapFromPrimary,
-    stats.totalAdjSecondary,
-    "secondary"
-  );
-  // tertiary adjustments must be <= cap2
-  generateAdjustmentProposals(
-    (prt) => prt === REMIT_TERTIARY,
-    stats.PendingCapFromSecondary,
-    stats.totalAdjTertiary,
-    "tertiary"
-  );
-
-  return { stats, proposals };
+  return {
+    proposals,
+    totalReduced: toDecimal(amountToReduce).minus(remainingToReduce),
+    remainingToReduce,
+  };
 }
 
-module.exports = { computeStatsAndProposals };
+module.exports = { computeStatsAndProposalsV2 };

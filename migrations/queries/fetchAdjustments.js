@@ -10,15 +10,11 @@ function adjustmentsDetailsFetchXmlForRemIds(remIds) {
   <entity name="smvs_claim_adjustment_detail">
     <attribute name="smvs_claim_adjustment_detailid" />
     <attribute name="smvs_amount" />
-    <attribute name="smvs_groupcode" />
-    <attribute name="smvs_reason_code" />
     <attribute name="createdon" />
     <link-entity name="smvs_patient_remittance" from="smvs_patient_remittanceid" to="smvs_patient_remittance" alias="rem">
       <attribute name="smvs_patient_remittanceid" />
       <attribute name="smvs_remit_type_indicator" />
       <attribute name="smvs_claim_id" />
-      <attribute name="smvs_patient_responsibility" />
-      <attribute name="smvs_pending_from_additional_payer" />
     </link-entity>
     <filter>
       <condition attribute="smvs_patient_remittance" operator="in">
